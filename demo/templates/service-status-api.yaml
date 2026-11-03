@@ -1,17 +1,15 @@
-{{- if .Values.statusApi.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "dd-vault.fullname" . }}-status-api
+  name: status-api
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "dd-vault.labels" . | nindent 4 }}
+    {{- include "dd-vault-demo.labels" . | nindent 4 }}
     app.kubernetes.io/component: status-api
 spec:
   selector:
-    app: {{ include "dd-vault.fullname" . }}-status-api
+    app: status-api
   ports:
     - name: http
       port: 8080
       targetPort: http
-{{- end }}

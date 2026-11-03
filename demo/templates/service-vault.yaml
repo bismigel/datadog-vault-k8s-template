@@ -1,17 +1,15 @@
-{{- if .Values.devVault.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "dd-vault.fullname" . }}-vault
+  name: vault
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "dd-vault.labels" . | nindent 4 }}
+    {{- include "dd-vault-demo.labels" . | nindent 4 }}
     app.kubernetes.io/component: vault
 spec:
   selector:
-    app: {{ include "dd-vault.fullname" . }}-vault
+    app: vault
   ports:
     - name: http
       port: 8200
       targetPort: http
-{{- end }}

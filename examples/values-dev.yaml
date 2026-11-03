@@ -1,11 +1,67 @@
-# Development/demo values.
+# Values for the official datadog/datadog chart (development/demo).
 #
-# This deploys a Vault -dev server, seeds dummy secrets, and sets the Agent
-# log level to DEBUG so the http_check request/response lines are visible.
-devVault:
-  enabled: true
+# The Agent is NOT deployed by this repo's demo chart. This file is passed to
+# the official chart:
+#
+#   helm install dd datadog/datadog -f examples/values-dev.yaml
+#
+# The demo chart must be installed first; scripts/install-dev.sh does that.
+
+# The demo Vault role is bound to this ServiceAccount.
+fullnameOverride: dd-agent
 
 datadog:
+  # The ENC handle is resolved by the Agent's native Vault backend. The
+  # official chart stores it in the dd-agent Secret and passes it as DD_API_KEY
+  # so the container entrypoint is satisfied.
+  apiKey: "ENC[/secret/datadog;api_key]"
+  site: us5.datadoghq.com
   logLevel: DEBUG
-  vault:
-    address: ""  # empty: use the in-chart Vault Service
+
+  # This is a minimal demo. The operator and kube-state-metrics are not needed.
+  operator:
+    enabled: false
+  kubeStateMetricsEnabled: false
+
+  secretBackend:
+    type: "hashicorp.vault"
+    config:
+      vault_address: "http://vault:8200"
+      vault_session:
+        vault_auth_type: kubernetes
+        vault_kubernetes_role: datadog-agent
+        vault_kubernetes_mount_path: auth/kubernetes/login
+    refreshInterval: 60
+    enableGlobalPermissions: true
+
+  confd:
+    http_check.yaml: |-
+      instances:
+        - name: status-api detail (Vault basic auth)
+          url: http://status-api:8080/api/detail
+          timeout: 10
+          username: ENC[/secret/http_check;username]
+          password: ENC[/secret/http_check;password]
+          tags:
+            - env:demo
+            - service:status-api
+
+clusterAgent:
+  enabled: false
+
+# The demo uses a dummy Datadog API key, so the Agent's /ready endpoint returns
+# 500 (forwarder unhealthy). Use /live for the readiness probe in the demo.
+# Remove this override when using a real API key.
+agents:
+  containers:
+    agent:
+      readinessProbe:
+        httpGet:
+          path: /live
+          port: 5555
+          scheme: HTTP
+        initialDelaySeconds: 15
+        periodSeconds: 15
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 6

@@ -1,31 +1,30 @@
-{{- if and .Values.devVault.enabled .Values.devVault.seed }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "dd-vault.fullname" . }}-vault-seed
+  name: vault-seed
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "dd-vault.labels" . | nindent 4 }}
+    {{- include "dd-vault-demo.labels" . | nindent 4 }}
     app.kubernetes.io/component: vault
 spec:
   backoffLimit: 10
   template:
     metadata:
       labels:
-        app: {{ include "dd-vault.fullname" . }}-vault-seed
-        {{- include "dd-vault.labels" . | nindent 8 }}
+        app: vault-seed
+        {{- include "dd-vault-demo.labels" . | nindent 8 }}
         app.kubernetes.io/component: vault
     spec:
-      serviceAccountName: {{ include "dd-vault.vaultSA" . }}
+      serviceAccountName: vault
       restartPolicy: OnFailure
       containers:
         - name: seed
-          image: {{ .Values.devVault.image }}
+          image: {{ .Values.vault.image }}
           env:
             - name: VAULT_ADDR
-              value: http://{{ include "dd-vault.fullname" . }}-vault:8200
+              value: http://vault:8200
             - name: VAULT_TOKEN
-              value: {{ .Values.devVault.rootToken | quote }}
+              value: {{ .Values.vault.rootToken | quote }}
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -44,15 +43,15 @@ spec:
 
               echo "writing policy and role..."
               vault policy write datadog-agent /vault-policy/policy.hcl
-              vault write auth/kubernetes/role/{{ .Values.datadog.vault.kubernetesRole }} \
-                bound_service_account_names={{ include "dd-vault.agentSA" . }} \
+              vault write auth/kubernetes/role/datadog-agent \
+                bound_service_account_names={{ .Values.agentServiceAccount }} \
                 bound_service_account_namespaces={{ .Release.Namespace }} \
                 policies=datadog-agent \
                 ttl=1h
 
               echo "seeding secrets..."
               vault secrets enable -path=secret kv-v2 2>/dev/null || true
-              vault kv put secret/datadog api_key={{ .Values.devVault.datadogApiKey | quote }}
+              vault kv put secret/datadog api_key={{ .Values.vault.datadogApiKey | quote }}
               vault kv put secret/http_check \
                 username={{ .Values.statusApi.auth.username | quote }} \
                 password={{ .Values.statusApi.auth.password | quote }}
@@ -63,5 +62,4 @@ spec:
       volumes:
         - name: policy
           configMap:
-            name: {{ include "dd-vault.fullname" . }}-vault-policy
-{{- end }}
+            name: vault-policy

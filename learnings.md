@@ -1,34 +1,160 @@
 # Learnings: Datadog Agent + Vault on Kubernetes
 
-What was verified while building this chart.
+What was verified while switching this template to the **official
+`datadog/datadog` Helm chart**.
 
 ## Test environment
 
 | Component | Version |
 | --- | --- |
-| Datadog Agent | `datadog/agent:7.85.0` |
-| HashiCorp Vault | `hashicorp/vault:1.21.2` (`-dev`) |
+| `datadog/datadog` chart | 3.264.0 |
+| Datadog Agent | 7.84.6 (chart default) |
+| HashiCorp Vault | 1.21.2 (`-dev`) |
 | Kubernetes | 1.36 (k3s) |
 | status-api | `ghcr.io/bismigel/status-api:latest` |
 
-## 1. Vault Kubernetes auth flow
+## 1. The official chart supports the native Vault backend
 
-The Agent's native backend authenticates with its pod ServiceAccount token:
+Use the chart's `datadog.secretBackend` values:
 
 ```yaml
-secret_backend_type: hashicorp.vault
-secret_backend_config:
-  vault_address: http://vault:8200
-  vault_session:
-    vault_auth_type: kubernetes
-    vault_kubernetes_role: datadog-agent
-    vault_kubernetes_mount_path: auth/kubernetes/login
+datadog:
+  secretBackend:
+    type: "hashicorp.vault"
+    config:
+      vault_address: "http://vault:8200"
+      vault_session:
+        vault_auth_type: kubernetes
+        vault_kubernetes_role: datadog-agent
+        vault_kubernetes_mount_path: auth/kubernetes/login
+    refreshInterval: 60
 ```
 
-Vault validates that token by calling the Kubernetes `TokenReview` API. The
-identity Vault uses for that call needs `system:auth-delegator`. In this chart's
-dev setup, the seed Job and the Vault server share the `vault` ServiceAccount,
-and the chart creates:
+The chart renders these as Agent environment variables:
+
+```text
+DD_SECRET_BACKEND_TYPE=hashicorp.vault
+DD_SECRET_BACKEND_CONFIG={"vault_address":"http://vault:8200","vault_session":{...}}
+DD_SECRET_REFRESH_INTERVAL=60
+```
+
+No custom Agent Deployment or custom secret-backend script is needed.
+
+## 2. `fullnameOverride` fixes the Agent ServiceAccount name
+
+The demo Vault role must bind the official chart's Agent ServiceAccount. The
+name depends on the chart's fullname. The demo values set:
+
+```yaml
+fullnameOverride: dd-agent
+```
+
+Result:
+
+- ServiceAccount: `dd-agent`
+- DaemonSet: `dd-agent`
+- Agent pods label: `app=dd-agent`
+- Agent container: `agent`
+
+The demo seed Job creates:
+
+```sh
+vault write auth/kubernetes/role/datadog-agent \
+  bound_service_account_names=dd-agent \
+  bound_service_account_namespaces=<namespace> \
+  policies=datadog-agent
+```
+
+If you change `fullnameOverride`, update the demo chart's
+`agentServiceAccount` and the Vault role.
+
+## 3. Disable operator, KSM, and Cluster Agent for the demo
+
+The official chart is large by default. For this minimal demo:
+
+```yaml
+datadog:
+  operator:
+    enabled: false
+  kubeStateMetricsEnabled: false
+
+clusterAgent:
+  enabled: false
+```
+
+- `datadog.operator.enabled` controls the `datadog-operator` subchart.
+- `datadog.kubeStateMetricsEnabled` controls the `kube-state-metrics`
+  subchart.
+- `clusterAgent.enabled: false` avoids the Cluster Agent RBAC and warnings for
+  a single-node-style demo.
+
+The rendered demo then contains one `dd-agent` DaemonSet instead of the
+operator, CRDs, and Cluster Agent.
+
+## 4. The Agent container still needs DD_API_KEY
+
+The official chart stores `datadog.apiKey` in the `dd-agent` Secret and passes
+it as `DD_API_KEY`:
+
+```yaml
+datadog:
+  apiKey: "ENC[/secret/datadog;api_key]"
+```
+
+The container entrypoint sees a non-empty value, and the Agent resolves the
+`ENC[...]` handle through Vault. This was verified in cluster:
+
+```text
+Number of secrets resolved: 3
+'/secret/datadog;api_key'
+'/secret/http_check;password'
+'/secret/http_check;username'
+```
+
+## 5. Dummy API keys break the `/ready` readiness probe
+
+The official chart's Agent readiness probe uses `/ready` on the health port.
+With a dummy API key, the forwarder is unhealthy, so `/ready` returns 500:
+
+```text
+Readiness probe failed: HTTP probe failed with statuscode: 500
+```
+
+The Agent's `/live` endpoint still returns 200, and the `http_check` itself
+works. For the demo, `examples/values-dev.yaml` overrides the readiness probe:
+
+```yaml
+agents:
+  containers:
+    agent:
+      readinessProbe:
+        httpGet:
+          path: /live
+          port: 5555
+          scheme: HTTP
+```
+
+Remove this override when using a real Datadog API key; the default `/ready`
+probe then reflects the forwarder health correctly.
+
+## 6. The demo chart must be installed first
+
+The official chart starts the Agent immediately. If Vault and the Vault role do
+not exist yet, the Agent cannot resolve secrets and will restart.
+
+`scripts/install-dev.sh` orders the install:
+
+1. `demo` chart: Vault, seed Job, status-api
+2. wait for Vault and the seed Job
+3. official `datadog/datadog` chart
+4. wait for the `dd-agent` DaemonSet
+
+## 7. Vault Kubernetes auth needs TokenReview permissions
+
+Vault validates the Agent's ServiceAccount token by calling the Kubernetes
+`TokenReview` API. The Vault ServiceAccount needs `system:auth-delegator`.
+
+The demo chart creates:
 
 ```yaml
 kind: ClusterRoleBinding
@@ -37,8 +163,8 @@ roleRef:
   name: system:auth-delegator
 subjects:
   - kind: ServiceAccount
-    name: <release>-datadog-vault-k8s-vault
-    namespace: <release-namespace>
+    name: vault
+    namespace: <namespace>
 ```
 
 The seed Job configures Vault with its own ServiceAccount token and CA:
@@ -51,39 +177,7 @@ vault write auth/kubernetes/config \
   kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
 ```
 
-The Vault role must bind the Agent's ServiceAccount name and namespace:
-
-```sh
-vault write auth/kubernetes/role/datadog-agent \
-  bound_service_account_names=<release>-datadog-vault-k8s-agent \
-  bound_service_account_namespaces=<release-namespace> \
-  policies=datadog-agent \
-  ttl=1h
-```
-
-## 2. The Agent container still needs DD_API_KEY
-
-The upstream `datadog/agent` container's s6 entrypoint checks for `DD_API_KEY`
-before the Agent starts. With only `api_key: ENC[...]` in `datadog.yaml`, the
-container exits with:
-
-```text
-You must set either a DD_API_KEY or DD_DELEGATED_AUTH_ORG_UUID environment
-variable to run the Datadog Agent container.
-```
-
-Set the environment variable to the same handle:
-
-```yaml
-env:
-  - name: DD_API_KEY
-    value: "ENC[/secret/datadog;api_key]"
-```
-
-The entrypoint passes, and the Agent resolves the handle through Vault. This
-was verified in-cluster.
-
-## 3. KV v2 needs sys/mounts read
+## 8. KV v2 needs sys/mounts read
 
 Policy:
 
@@ -97,112 +191,81 @@ path "sys/mounts" {
 }
 ```
 
-Without `sys/mounts`, the Agent assumes KV v1. A KV v2 path then fails with
-`Invalid path for a versioned K/V secrets engine`. Reproduced with a token that
-had only `secret/data/*` read; adding `sys/mounts` fixed it.
+Without `sys/mounts`, the Agent assumes KV v1 and a KV v2 path fails with
+`Invalid path for a versioned K/V secrets engine`.
 
-## 4. Rotation works with secret_refresh_interval
+## 9. Do not mount a ConfigMap at /vault
 
-With `secret_refresh_interval: 15` and Agent 7.85.0:
-
-- rotating `secret/http_check` to a wrong password produced `401`
-- restoring the password produced `200`
-
-The check refresh for file-based checks is available in Agent 7.76+.
-
-## 5. Dev Vault is not production
-
-The chart's `devVault`:
-
-- runs `vault server -dev`
-- uses an in-memory store
-- uses a root token
-- seeds dummy secrets
-- is deleted with the Helm release/namespace
-
-For production, use an existing Vault with TLS, a real storage backend, and
-Kubernetes auth or AppRole. Do not use the root token.
-
-## 6. Helm chart ordering
-
-The Agent must resolve secrets at startup. If it starts before the Vault seed
-Job has created the policy/role/secrets, it exits and the Agent process
-restarts.
-
-The chart avoids this with an init container, `wait-for-vault`, which waits for:
-
-1. Vault's `/v1/sys/health` endpoint
-2. a successful `auth/kubernetes/login` using the Agent ServiceAccount
-
-The Agent container starts only after both succeed. This was verified in
-cluster: the init container logs `Vault is ready for the Agent` before the
-Agent starts.
-
-## 6b. Do not use agent health as a readiness probe with a dummy key
-
-With a dummy Datadog API key, the forwarder is unhealthy. `agent health` then
-returns non-zero, so a readiness probe using it keeps the pod NotReady and
-blocks the rollout. Use `agent status` in the verify script, or add
-`agent health` only when a real API key is configured.
-
-## 6c. Do not mount a ConfigMap at /vault in the Vault image
-
-The official Vault image declares a volume at `/vault/file`. Mounting a
-ConfigMap at `/vault` caused:
+The official Vault image declares a volume at `/vault/file`. Mounting the seed
+policy ConfigMap at `/vault` caused:
 
 ```text
 error mounting ... to rootfs at "/vault/file": ... read-only file system
 ```
 
-Mount the seed policy at a different path, such as `/vault-policy`, and pass
-`/vault-policy/policy.hcl` to `vault policy write`.
+The demo chart mounts the policy at `/vault-policy` and uses
+`/vault-policy/policy.hcl`.
 
-## 7. Cluster-scoped RBAC
+## 10. Test evidence
 
-The `system:auth-delegator` binding is cluster-scoped. Helm uninstall removes
-it because the chart created it, but if you set
-`devVault.tokenReview.createClusterRoleBinding=false`, you must create and
-manage that binding yourself.
-
-## 8. status-api is an internal Service
-
-The Agent uses:
+Secret resolution:
 
 ```text
-http://<release>-datadog-vault-k8s-status-api:8080/api/detail
+=== Secrets stats ===
+Number of secrets resolved: 3
+'/secret/datadog;api_key'
+'/secret/http_check;password'
+'/secret/http_check;username'
+'secret_refresh_interval' is enabled: the first refresh will happen 7.83s after startup and then every 1m0s
 ```
 
-This is the in-cluster Service DNS name and port. It is not the public ingress
-(`status.bismigel.dev`). The public hostname goes through Cloudflare and
-ingress-nginx on port 443.
+The check:
 
-## 9. `agent status` does not prove the URL status
-
-The `[OK]` next to a check instance in `agent status` is the check runner
-status, not the monitored URL's status. Use one of:
-
-- the DEBUG log line with the HTTP status code
-- `agent check http_check` plus the service check in Datadog
-- the status-api endpoint directly with the same credentials
-
-The chart's dev values set `logLevel: DEBUG` so the request lines are visible.
-
-## 10. Test harness gotcha: pipefail and grep -q
-
-When polling `kubectl logs | grep -q` under `set -o pipefail`, `grep -q` can
-exit early, the log producer gets `SIGPIPE`, and the pipeline returns non-zero
-even though the pattern matched. Use:
-
-```bash
-kubectl logs ... | grep -- "$pattern" >/dev/null
+```text
+http://status-api:8080 "GET /api/detail HTTP/1.1" 200 226
+http://status-api:8080/api/detail is UP
 ```
 
-## Open items
+Rotation with `secret_refresh_interval`:
 
-- The chart was tested with a Vault `-dev` server. Re-test against your
-  production Vault with TLS and the real policy/role.
-- The chart's dev seed uses `statusApi.auth.username/password`. If you use
-  `statusApi.auth.existingSecret`, seed `secret/http_check` separately.
-- `implicit_auth` on Agent 7.85.0 requires the string `"true"`, not a YAML
-  boolean. The chart uses Kubernetes auth by default, so this does not affect
-  the default path.
+```text
+401 after rotation: 1
+200 after restore: 1
+PASS: official chart rotation test
+```
+
+Agent DaemonSet:
+
+```text
+dd-agent-gv8hh   3/3   Running
+dd-agent-l65f4   3/3   Running
+dd-agent-nmtw9   3/3   Running
+```
+
+## 11. Production notes
+
+- Do not deploy the `demo` chart in production.
+- Use a real Vault with TLS, persistent storage, and Kubernetes auth or
+  AppRole.
+- Keep `enableGlobalPermissions: false` and use a least-privilege Vault policy.
+- The Vault role must bind the Agent ServiceAccount (`dd-agent` with the
+  provided fullnameOverride) and the release namespace.
+- The official chart's default Agent image is 7.84.6; pin `agents.image.tag`
+  if you need a different version.
+- `datadog.secretBackend.refreshInterval` maps to the Agent's
+  `secret_refresh_interval`; keep it set for rotation.
+
+## 12. General gotchas from the earlier native-backend tests
+
+These still apply:
+
+- `vault_token` is a literal static token, not a file path.
+- `implicit_auth` must be nested under `vault_session` and quoted as `"true"`
+  on Agent 7.85.0.
+- A handle embedded in a longer header value (`Bearer ENC[...]`) was not
+  substituted on 7.85.0; store the full header value and use `ENC[...]` as the
+  whole value.
+- The Agent image's `/etc/datadog-agent/auth_token` is its IPC token, not the
+  Vault token.
+- For polling logs under `set -o pipefail`, use `grep >/dev/null` instead of
+  `grep -q` to avoid SIGPIPE false negatives.

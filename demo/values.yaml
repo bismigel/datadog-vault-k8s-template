@@ -1,0 +1,35 @@
+# Values for the local demo chart. This is not the Datadog Agent chart.
+#
+# The Agent is deployed by the official chart:
+#   helm install dd datadog/datadog -f examples/values-dev.yaml
+
+# The official chart uses fullnameOverride: dd-agent, so its Agent
+# ServiceAccount is dd-agent. The Vault role created by the seed Job is bound
+# to this ServiceAccount.
+agentServiceAccount: dd-agent
+
+tokenReview:
+  # Required for Vault's Kubernetes auth method. The Vault ServiceAccount
+  # needs system:auth-delegator to call TokenReview.
+  createClusterRoleBinding: true
+
+vault:
+  image: hashicorp/vault:1.21.2
+  rootToken: root
+  # Dev-only dummy Datadog key written to secret/datadog. The official chart's
+  # apiKey handle is resolved from here.
+  datadogApiKey: dummy-datadog-api-key
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+statusApi:
+  image: ghcr.io/bismigel/status-api:latest
+  auth:
+    username: testuser
+    password: testpass
+  resources: {}

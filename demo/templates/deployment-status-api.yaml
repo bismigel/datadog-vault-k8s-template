@@ -1,22 +1,21 @@
-{{- if .Values.statusApi.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "dd-vault.fullname" . }}-status-api
+  name: status-api
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "dd-vault.labels" . | nindent 4 }}
+    {{- include "dd-vault-demo.labels" . | nindent 4 }}
     app.kubernetes.io/component: status-api
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: {{ include "dd-vault.fullname" . }}-status-api
+      app: status-api
   template:
     metadata:
       labels:
-        app: {{ include "dd-vault.fullname" . }}-status-api
-        {{- include "dd-vault.labels" . | nindent 8 }}
+        app: status-api
+        {{- include "dd-vault-demo.labels" . | nindent 8 }}
         app.kubernetes.io/component: status-api
     spec:
       containers:
@@ -26,12 +25,12 @@ spec:
             - name: STATUS_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "dd-vault.statusApiSecretName" . }}
+                  name: status-api-auth
                   key: username
             - name: STATUS_PASS
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "dd-vault.statusApiSecretName" . }}
+                  name: status-api-auth
                   key: password
             - name: CHECKS_FILE
               value: /etc/status/checks.json
@@ -56,5 +55,4 @@ spec:
       volumes:
         - name: checks
           configMap:
-            name: {{ include "dd-vault.fullname" . }}-status-api-checks
-{{- end }}
+            name: status-api-checks

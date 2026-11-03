@@ -1,32 +1,31 @@
-{{- if .Values.devVault.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "dd-vault.fullname" . }}-vault
+  name: vault
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "dd-vault.labels" . | nindent 4 }}
+    {{- include "dd-vault-demo.labels" . | nindent 4 }}
     app.kubernetes.io/component: vault
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: {{ include "dd-vault.fullname" . }}-vault
+      app: vault
   template:
     metadata:
       labels:
-        app: {{ include "dd-vault.fullname" . }}-vault
-        {{- include "dd-vault.labels" . | nindent 8 }}
+        app: vault
+        {{- include "dd-vault-demo.labels" . | nindent 8 }}
         app.kubernetes.io/component: vault
     spec:
-      serviceAccountName: {{ include "dd-vault.vaultSA" . }}
+      serviceAccountName: vault
       containers:
         - name: vault
-          image: {{ .Values.devVault.image }}
+          image: {{ .Values.vault.image }}
           args: ["server", "-dev"]
           env:
             - name: VAULT_DEV_ROOT_TOKEN_ID
-              value: {{ .Values.devVault.rootToken | quote }}
+              value: {{ .Values.vault.rootToken | quote }}
             - name: VAULT_DEV_LISTEN_ADDRESS
               value: 0.0.0.0:8200
           ports:
@@ -39,5 +38,4 @@ spec:
             initialDelaySeconds: 3
             periodSeconds: 3
           resources:
-            {{- toYaml .Values.devVault.resources | nindent 12 }}
-{{- end }}
+            {{- toYaml .Values.vault.resources | nindent 12 }}

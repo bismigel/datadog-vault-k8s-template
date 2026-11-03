@@ -1,24 +1,47 @@
-# Production example.
+# Values for the official datadog/datadog chart (production example).
 #
-# This assumes an existing Vault with the Kubernetes auth method enabled and a
-# role bound to the Agent ServiceAccount. It does not deploy Vault or status-api.
-devVault:
-  enabled: false
+# This does not deploy Vault or status-api. It assumes:
+#   - an existing Vault with the Kubernetes auth method enabled
+#   - a role bound to the Agent ServiceAccount (fullnameOverride: dd-agent)
+#   - a least-privilege policy with secret/data/* and sys/mounts read
+#   - secret/datadog and secret/http_check populated in Vault
+#
+#   helm install dd datadog/datadog -f examples/values-production.yaml
+#
+# The Vault role must bind:
+#   ServiceAccount: dd-agent
+#   Namespace:      the release namespace
+
+fullnameOverride: dd-agent
 
 datadog:
+  apiKey: "ENC[/secret/datadog;api_key]"
   site: us5.datadoghq.com
   logLevel: INFO
-  vault:
-    address: https://vault.example.com:8200
-    authType: kubernetes
-    kubernetesRole: datadog-agent
-    kubernetesMountPath: auth/kubernetes/login
 
-statusApi:
+  operator:
+    enabled: false
+  kubeStateMetricsEnabled: false
+
+  secretBackend:
+    type: "hashicorp.vault"
+    config:
+      vault_address: "https://vault.example.com:8200"
+      vault_session:
+        vault_auth_type: kubernetes
+        vault_kubernetes_role: datadog-agent
+        vault_kubernetes_mount_path: auth/kubernetes/login
+    refreshInterval: 300
+    enableGlobalPermissions: false
+
+  confd:
+    http_check.yaml: |-
+      instances:
+        - name: status-api detail
+          url: https://status.example.com/api/detail
+          timeout: 10
+          username: ENC[/secret/http_check;username]
+          password: ENC[/secret/http_check;password]
+
+clusterAgent:
   enabled: false
-  auth:
-    existingSecret: status-api-auth
-
-httpCheck:
-  enabled: true
-  url: https://status.example.com/api/detail

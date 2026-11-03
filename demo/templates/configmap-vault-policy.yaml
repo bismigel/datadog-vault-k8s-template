@@ -1,11 +1,10 @@
-{{- if .Values.devVault.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "dd-vault.fullname" . }}-vault-policy
+  name: vault-policy
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "dd-vault.labels" . | nindent 4 }}
+    {{- include "dd-vault-demo.labels" . | nindent 4 }}
     app.kubernetes.io/component: vault
 data:
   policy.hcl: |
@@ -15,4 +14,3 @@ data:
     path "sys/mounts" {
       capabilities = ["read"]
     }
-{{- end }}

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: dd-vault-demo
+description: Demo Vault dev server and status-api target for the official Datadog chart
+type: application
+version: 0.1.0
+appVersion: "1.0"

@@ -1,0 +1,20 @@
+Demo chart installed in namespace {{ .Release.Namespace }}.
+
+The Vault Service is:
+
+  vault:8200
+
+The status-api Service is:
+
+  status-api:8080
+
+The Vault role `datadog-agent` is bound to the ServiceAccount
+`{{ .Values.agentServiceAccount }}` in `{{ .Release.Namespace }}`.
+
+Install the official Datadog chart with:
+
+  helm install dd datadog/datadog -n {{ .Release.Namespace }} \
+    -f examples/values-dev.yaml
+
+WARNING: this chart runs Vault in -dev mode with a root token. Do not use it in
+production.
