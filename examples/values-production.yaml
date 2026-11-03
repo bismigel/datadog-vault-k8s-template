@@ -1,0 +1,24 @@
+# Production example.
+#
+# This assumes an existing Vault with the Kubernetes auth method enabled and a
+# role bound to the Agent ServiceAccount. It does not deploy Vault or status-api.
+devVault:
+  enabled: false
+
+datadog:
+  site: us5.datadoghq.com
+  logLevel: INFO
+  vault:
+    address: https://vault.example.com:8200
+    authType: kubernetes
+    kubernetesRole: datadog-agent
+    kubernetesMountPath: auth/kubernetes/login
+
+statusApi:
+  enabled: false
+  auth:
+    existingSecret: status-api-auth
+
+httpCheck:
+  enabled: true
+  url: https://status.example.com/api/detail

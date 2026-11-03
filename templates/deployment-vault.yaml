@@ -1,0 +1,43 @@
+{{- if .Values.devVault.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dd-vault.fullname" . }}-vault
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dd-vault.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vault
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "dd-vault.fullname" . }}-vault
+  template:
+    metadata:
+      labels:
+        app: {{ include "dd-vault.fullname" . }}-vault
+        {{- include "dd-vault.labels" . | nindent 8 }}
+        app.kubernetes.io/component: vault
+    spec:
+      serviceAccountName: {{ include "dd-vault.vaultSA" . }}
+      containers:
+        - name: vault
+          image: {{ .Values.devVault.image }}
+          args: ["server", "-dev"]
+          env:
+            - name: VAULT_DEV_ROOT_TOKEN_ID
+              value: {{ .Values.devVault.rootToken | quote }}
+            - name: VAULT_DEV_LISTEN_ADDRESS
+              value: 0.0.0.0:8200
+          ports:
+            - name: http
+              containerPort: 8200
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 3
+          resources:
+            {{- toYaml .Values.devVault.resources | nindent 12 }}
+{{- end }}

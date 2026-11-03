@@ -1,0 +1,60 @@
+{{- if .Values.statusApi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dd-vault.fullname" . }}-status-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dd-vault.labels" . | nindent 4 }}
+    app.kubernetes.io/component: status-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "dd-vault.fullname" . }}-status-api
+  template:
+    metadata:
+      labels:
+        app: {{ include "dd-vault.fullname" . }}-status-api
+        {{- include "dd-vault.labels" . | nindent 8 }}
+        app.kubernetes.io/component: status-api
+    spec:
+      containers:
+        - name: status-api
+          image: {{ .Values.statusApi.image }}
+          env:
+            - name: STATUS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dd-vault.statusApiSecretName" . }}
+                  key: username
+            - name: STATUS_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dd-vault.statusApiSecretName" . }}
+                  key: password
+            - name: CHECKS_FILE
+              value: /etc/status/checks.json
+            - name: POLL_SECONDS
+              value: "10"
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: checks
+              mountPath: /etc/status/checks.json
+              subPath: checks.json
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 3
+          resources:
+            {{- toYaml .Values.statusApi.resources | nindent 12 }}
+      volumes:
+        - name: checks
+          configMap:
+            name: {{ include "dd-vault.fullname" . }}-status-api-checks
+{{- end }}

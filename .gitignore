@@ -1,0 +1,9 @@
+.DS_Store
+.env
+.env.local
+*.log
+*.tgz
+values.local.yaml
+values.*.local.yaml
+__pycache__/
+*.pyc

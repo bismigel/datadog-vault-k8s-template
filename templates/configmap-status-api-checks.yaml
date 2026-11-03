@@ -1,0 +1,13 @@
+{{- if .Values.statusApi.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dd-vault.fullname" . }}-status-api-checks
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dd-vault.labels" . | nindent 4 }}
+    app.kubernetes.io/component: status-api
+data:
+  checks.json: |
+    {"checks":[{"name":"status-api-self","kind":"http_status","url":"http://127.0.0.1:8080/healthz","expect_status":[200]}]}
+{{- end }}

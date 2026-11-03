@@ -1,0 +1,17 @@
+{{- if and .Values.devVault.enabled .Values.devVault.tokenReview.createClusterRoleBinding }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "dd-vault.fullname" . }}-{{ .Release.Namespace }}-vault-tokenreview
+  labels:
+    {{- include "dd-vault.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vault
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "dd-vault.vaultSA" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -1,0 +1,67 @@
+{{- if and .Values.devVault.enabled .Values.devVault.seed }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "dd-vault.fullname" . }}-vault-seed
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dd-vault.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vault
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app: {{ include "dd-vault.fullname" . }}-vault-seed
+        {{- include "dd-vault.labels" . | nindent 8 }}
+        app.kubernetes.io/component: vault
+    spec:
+      serviceAccountName: {{ include "dd-vault.vaultSA" . }}
+      restartPolicy: OnFailure
+      containers:
+        - name: seed
+          image: {{ .Values.devVault.image }}
+          env:
+            - name: VAULT_ADDR
+              value: http://{{ include "dd-vault.fullname" . }}-vault:8200
+            - name: VAULT_TOKEN
+              value: {{ .Values.devVault.rootToken | quote }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "waiting for vault..."
+              until vault status >/dev/null 2>&1; do sleep 1; done
+
+              echo "enabling kubernetes auth..."
+              vault auth enable kubernetes 2>/dev/null || true
+
+              TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+              vault write auth/kubernetes/config \
+                kubernetes_host="https://kubernetes.default.svc" \
+                token_reviewer_jwt="$TOKEN" \
+                kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+
+              echo "writing policy and role..."
+              vault policy write datadog-agent /vault-policy/policy.hcl
+              vault write auth/kubernetes/role/{{ .Values.datadog.vault.kubernetesRole }} \
+                bound_service_account_names={{ include "dd-vault.agentSA" . }} \
+                bound_service_account_namespaces={{ .Release.Namespace }} \
+                policies=datadog-agent \
+                ttl=1h
+
+              echo "seeding secrets..."
+              vault secrets enable -path=secret kv-v2 2>/dev/null || true
+              vault kv put secret/datadog api_key={{ .Values.devVault.datadogApiKey | quote }}
+              vault kv put secret/http_check \
+                username={{ .Values.statusApi.auth.username | quote }} \
+                password={{ .Values.statusApi.auth.password | quote }}
+              echo "done"
+          volumeMounts:
+            - name: policy
+              mountPath: /vault-policy
+      volumes:
+        - name: policy
+          configMap:
+            name: {{ include "dd-vault.fullname" . }}-vault-policy
+{{- end }}

@@ -1,0 +1,11 @@
+# Development/demo values.
+#
+# This deploys a Vault -dev server, seeds dummy secrets, and sets the Agent
+# log level to DEBUG so the http_check request/response lines are visible.
+devVault:
+  enabled: true
+
+datadog:
+  logLevel: DEBUG
+  vault:
+    address: ""  # empty: use the in-chart Vault Service

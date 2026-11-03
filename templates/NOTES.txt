@@ -1,0 +1,29 @@
+Datadog Agent + HashiCorp Vault installed in namespace {{ .Release.Namespace }}.
+
+Check the pods:
+
+  kubectl -n {{ .Release.Namespace }} get pods
+
+Check the secrets resolved by the Agent:
+
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "dd-vault.fullname" . }}-agent -c datadog-agent -- agent secret
+
+Check the status-api check:
+
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "dd-vault.fullname" . }}-agent | grep 'GET /api/detail HTTP/1.1" 200'
+
+The in-cluster status-api Service is:
+
+  {{ include "dd-vault.fullname" . }}-status-api:8080
+
+If statusApi.enabled is true, test it with a port-forward:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "dd-vault.fullname" . }}-status-api 8080:8080
+  curl -i http://localhost:8080/api/detail
+  curl -i -u <username>:<password> http://localhost:8080/api/detail
+
+{{- if .Values.devVault.enabled }}
+
+WARNING: devVault is enabled. This is a Vault -dev server with a root token.
+Do not use this in production.
+{{- end }}
